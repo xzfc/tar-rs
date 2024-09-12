@@ -162,7 +162,7 @@ impl<W: Write> Builder<W> {
     ) -> io::Result<()> {
         prepare_header_path(self.get_mut(), header, path.as_ref())?;
         header.set_cksum();
-        self.append(&header, data)
+        self.append(header, data)
     }
 
     /// Adds a new link (symbolic or hard) entry to this archive with the specified path and target.
@@ -210,7 +210,7 @@ impl<W: Write> Builder<W> {
         prepare_header_path(self.get_mut(), header, path)?;
         prepare_header_link(self.get_mut(), header, target)?;
         header.set_cksum();
-        self.append(&header, std::io::empty())
+        self.append(header, std::io::empty())
     }
 
     /// Adds a file on the local filesystem to this archive.
@@ -238,7 +238,7 @@ impl<W: Write> Builder<W> {
     /// ar.append_path("foo/bar.txt").unwrap();
     /// ```
     pub fn append_path<P: AsRef<Path>>(&mut self, path: P) -> io::Result<()> {
-        let mode = self.mode.clone();
+        let mode = self.mode;
         let follow = self.follow;
         append_path_with_name(self.get_mut(), path.as_ref(), None, mode, follow)
     }
@@ -276,7 +276,7 @@ impl<W: Write> Builder<W> {
         path: P,
         name: N,
     ) -> io::Result<()> {
-        let mode = self.mode.clone();
+        let mode = self.mode;
         let follow = self.follow;
         append_path_with_name(
             self.get_mut(),
@@ -314,7 +314,7 @@ impl<W: Write> Builder<W> {
     /// ar.append_file("bar/baz.txt", &mut f).unwrap();
     /// ```
     pub fn append_file<P: AsRef<Path>>(&mut self, path: P, file: &mut fs::File) -> io::Result<()> {
-        let mode = self.mode.clone();
+        let mode = self.mode;
         append_file(self.get_mut(), path.as_ref(), file, mode)
     }
 
@@ -351,7 +351,7 @@ impl<W: Write> Builder<W> {
         P: AsRef<Path>,
         Q: AsRef<Path>,
     {
-        let mode = self.mode.clone();
+        let mode = self.mode;
         append_dir(self.get_mut(), path.as_ref(), src_path.as_ref(), mode)
     }
 
@@ -413,7 +413,7 @@ impl<W: Write> Builder<W> {
         P: AsRef<Path>,
         Q: AsRef<Path>,
     {
-        let mode = self.mode.clone();
+        let mode = self.mode;
         let follow = self.follow;
         append_dir_all(
             self.get_mut(),
@@ -588,7 +588,7 @@ fn prepare_header_path(dst: &mut dyn Write, header: &mut Header, path: &Path) ->
     // long name extension by emitting an entry which indicates that it's the
     // filename.
     if let Err(e) = header.set_path(path) {
-        let data = path2bytes(&path)?;
+        let data = path2bytes(path)?;
         let max = header.as_old().name.len();
         // Since `e` isn't specific enough to let us know the path is indeed too
         // long, verify it first before using the extension.
@@ -620,8 +620,8 @@ fn prepare_header_link(
     link_name: &Path,
 ) -> io::Result<()> {
     // Same as previous function but for linkname
-    if let Err(e) = header.set_link_name(&link_name) {
-        let data = path2bytes(&link_name)?;
+    if let Err(e) = header.set_link_name(link_name) {
+        let data = path2bytes(link_name)?;
         if data.len() < header.as_old().linkname.len() {
             return Err(e);
         }
@@ -660,7 +660,7 @@ fn append_dir_all(
 ) -> io::Result<()> {
     let mut stack = vec![(src_path.to_path_buf(), true, false)];
     while let Some((src, is_dir, is_symlink)) = stack.pop() {
-        let dest = path.join(src.strip_prefix(&src_path).unwrap());
+        let dest = path.join(src.strip_prefix(src_path).unwrap());
         // In case of a symlink pointing to a directory, is_dir is false, but src.is_dir() will return true
         if is_dir || (is_symlink && follow && src.is_dir()) {
             for entry in fs::read_dir(&src)? {
