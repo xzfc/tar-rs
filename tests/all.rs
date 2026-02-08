@@ -829,16 +829,12 @@ fn clamp_mtime() {
     let max_clamp = u64::MAX;
 
     let mut ar = Builder::new(Vec::new());
-    ar.mode(HeaderMode::Config(
-        HeaderModeConfig::complete().clamp_mtime(clamp),
-    ));
+    ar.mode(HeaderModeConfig::complete().clamp_mtime(clamp));
     let path = td.path().join("tmpfile");
     File::create(&path).unwrap();
     ar.append_path_with_name(&path, "a").unwrap();
 
-    ar.mode(HeaderMode::Config(
-        HeaderModeConfig::complete().clamp_mtime(max_clamp),
-    ));
+    ar.mode(HeaderModeConfig::complete().clamp_mtime(max_clamp));
     ar.append_path_with_name(&path, "b").unwrap();
 
     let data = ar.into_inner().unwrap();

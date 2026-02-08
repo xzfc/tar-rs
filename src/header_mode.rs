@@ -25,23 +25,25 @@ pub enum HeaderMode {
     Config(HeaderModeConfig),
 }
 
+impl From<HeaderModeConfig> for HeaderMode {
+    fn from(config: HeaderModeConfig) -> HeaderMode {
+        HeaderMode::Config(config)
+    }
+}
+
 /// Declares the information that should be included when filling a [`Header`]
 /// from filesystem metadata.
 ///
 /// ```
-/// # use tar::{Builder, HeaderMode, HeaderModeConfig};
+/// # use tar::{Builder, HeaderModeConfig};
 /// # let mut writer = Vec::new();
 /// let mut ar = Builder::new(writer);
 ///
 /// // Keep timestamps, but normalize everything else.
-/// ar.mode(HeaderMode::Config(
-///     HeaderModeConfig::deterministic().preserve_mtime(),
-/// ));
+/// ar.mode(HeaderModeConfig::deterministic().preserve_mtime());
 ///
 /// // Keep all metadata, but clamp too new timestamps.
-/// ar.mode(HeaderMode::Config(
-///     HeaderModeConfig::complete().clamp_mtime(1234567890),
-/// ));
+/// ar.mode(HeaderModeConfig::complete().clamp_mtime(1234567890));
 /// ```
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct HeaderModeConfig {

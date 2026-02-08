@@ -300,7 +300,7 @@ fn header_mode_config() {
 
     for (mode, (uid, gid, mtime, file_mode)) in table.into_iter() {
         let mut h = Header::new_ustar();
-        h.set_metadata_in_mode(&metadata, HeaderMode::Config(mode));
+        h.set_metadata_in_mode(&metadata, mode);
         assert_eq!(h.uid().unwrap(), uid.into(), "uid, {mode:?}");
         assert_eq!(h.gid().unwrap(), gid.into(), "gid, {mode:?}");
         assert_eq!(h.mtime().unwrap(), mtime, "mtime, {mode:?}");

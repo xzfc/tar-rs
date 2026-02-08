@@ -282,10 +282,10 @@ impl Header {
         self.fill_from(meta, HeaderMode::Complete);
     }
 
-    /// Sets only the metadata relevant to the given HeaderMode in this header
-    /// from the metadata argument provided.
-    pub fn set_metadata_in_mode(&mut self, meta: &fs::Metadata, mode: HeaderMode) {
-        self.fill_from(meta, mode);
+    /// Sets only the metadata relevant to the given [`HeaderMode`] in this
+    /// header from the metadata argument provided.
+    pub fn set_metadata_in_mode<M: Into<HeaderMode>>(&mut self, meta: &fs::Metadata, mode: M) {
+        self.fill_from(meta, mode.into());
     }
 
     /// Returns the size of entry's data this header represents.

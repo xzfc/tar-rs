@@ -46,8 +46,8 @@ impl<W: Write> Builder<W> {
     /// Changes the HeaderMode that will be used when reading fs Metadata for
     /// methods that implicitly read metadata for an input Path. Notably, this
     /// does _not_ apply to `append(Header)`.
-    pub fn mode(&mut self, mode: HeaderMode) {
-        self.options.mode = mode;
+    pub fn mode<M: Into<HeaderMode>>(&mut self, mode: M) {
+        self.options.mode = mode.into();
     }
 
     /// Follow symlinks, archiving the contents of the file they point to rather
