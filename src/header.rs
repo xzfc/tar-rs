@@ -13,14 +13,7 @@ use std::path::{Component, Path, PathBuf};
 use std::str;
 
 use crate::other;
-use crate::EntryType;
-
-/// A deterministic, arbitrary, non-zero timestamp that use used as `mtime`
-/// of headers when [`HeaderMode::Deterministic`] is used.
-///
-/// This value, chosen after careful deliberation, corresponds to _Jul 23, 2006_,
-/// which is the date of the first commit for what would become Rust.
-pub const DETERMINISTIC_TIMESTAMP: u64 = 1153704088;
+use crate::{EntryType, HeaderMode, DETERMINISTIC_TIMESTAMP};
 
 pub(crate) const BLOCK_SIZE: u64 = 512;
 
@@ -33,20 +26,6 @@ pub(crate) const GNU_EXT_SPARSE_HEADERS_COUNT: usize = 21;
 #[allow(missing_docs)]
 pub struct Header {
     bytes: [u8; BLOCK_SIZE as usize],
-}
-
-/// Declares the information that should be included when filling a Header
-/// from filesystem metadata.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[non_exhaustive]
-pub enum HeaderMode {
-    /// All supported metadata, including mod/access times and ownership will
-    /// be included.
-    Complete,
-
-    /// Only metadata that is directly relevant to the identity of a file will
-    /// be included. In particular, ownership and mod/access times are excluded.
-    Deterministic,
 }
 
 /// Representation of the header of an entry in an archive

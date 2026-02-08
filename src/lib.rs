@@ -28,8 +28,9 @@ pub use crate::builder::{Builder, EntryWriter};
 pub use crate::entry::{Entry, Unpacked};
 pub use crate::entry_type::EntryType;
 pub use crate::header::GnuExtSparseHeader;
-pub use crate::header::DETERMINISTIC_TIMESTAMP;
-pub use crate::header::{GnuHeader, GnuSparseHeader, Header, HeaderMode, OldHeader, UstarHeader};
+pub use crate::header::{GnuHeader, GnuSparseHeader, Header, OldHeader, UstarHeader};
+pub use crate::header_mode::HeaderMode;
+pub use crate::header_mode::DETERMINISTIC_TIMESTAMP;
 pub use crate::pax::{PaxExtension, PaxExtensions};
 
 mod archive;
@@ -38,6 +39,7 @@ mod entry;
 mod entry_type;
 mod error;
 mod header;
+mod header_mode;
 mod pax;
 
 fn other(msg: &str) -> Error {

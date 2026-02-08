@@ -4,11 +4,11 @@ use std::io::prelude::*;
 use std::path::Path;
 use std::str;
 
+use crate::header::path2bytes;
 use crate::header::BLOCK_SIZE;
 use crate::header::GNU_SPARSE_HEADERS_COUNT;
-use crate::header::{path2bytes, HeaderMode};
 use crate::GnuExtSparseHeader;
-use crate::{other, EntryType, Header};
+use crate::{other, EntryType, Header, HeaderMode};
 
 /// A structure for building archives
 ///
