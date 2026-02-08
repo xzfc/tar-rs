@@ -11,7 +11,7 @@ use std::iter::repeat;
 use std::path::{Path, PathBuf};
 
 use filetime::FileTime;
-use tar::{Archive, Builder, Entries, Entry, EntryType, Header, HeaderMode};
+use tar::{Archive, Builder, Entries, Entry, EntryType, Header, HeaderMode, HeaderModeConfig};
 use tempfile::{Builder as TempBuilder, TempDir};
 
 macro_rules! tar {
@@ -818,6 +818,44 @@ fn zero_file_times() {
     let atime = FileTime::from_last_access_time(&meta);
     assert!(mtime.unix_seconds() != 0);
     assert!(atime.unix_seconds() != 0);
+}
+
+#[test]
+#[cfg(unix)]
+fn clamp_mtime() {
+    let td = TempBuilder::new().prefix("tar-rs").tempdir().unwrap();
+
+    let clamp = 1000000000;
+    let max_clamp = u64::MAX;
+
+    let mut ar = Builder::new(Vec::new());
+    ar.mode(HeaderMode::Config(
+        HeaderModeConfig::complete().clamp_mtime(clamp),
+    ));
+    let path = td.path().join("tmpfile");
+    File::create(&path).unwrap();
+    ar.append_path_with_name(&path, "a").unwrap();
+
+    ar.mode(HeaderMode::Config(
+        HeaderModeConfig::complete().clamp_mtime(max_clamp),
+    ));
+    ar.append_path_with_name(&path, "b").unwrap();
+
+    let data = ar.into_inner().unwrap();
+    let mut ar = Archive::new(&data[..]);
+    assert!(ar.unpack(td.path()).is_ok());
+
+    let meta = fs::metadata(td.path().join("a")).unwrap();
+    let mtime = FileTime::from_last_modification_time(&meta);
+    let atime = FileTime::from_last_access_time(&meta);
+    assert!(mtime.unix_seconds() as u64 == clamp);
+    assert!(atime.unix_seconds() as u64 == clamp);
+
+    let meta = fs::metadata(td.path().join("b")).unwrap();
+    let mtime = FileTime::from_last_modification_time(&meta);
+    let atime = FileTime::from_last_access_time(&meta);
+    assert!((mtime.unix_seconds() as u64) < max_clamp);
+    assert!((atime.unix_seconds() as u64) < max_clamp);
 }
 
 #[test]

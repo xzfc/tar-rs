@@ -5,7 +5,7 @@ use std::{mem, thread, time};
 
 use tempfile::Builder;
 
-use tar::{GnuHeader, Header, HeaderMode};
+use tar::{GnuHeader, Header, HeaderMode, HeaderModeConfig};
 
 #[test]
 fn default_gnu() {
@@ -209,6 +209,103 @@ fn set_metadata_deterministic() {
     // check them anyway.
     assert_eq!(one.uid().unwrap(), two.uid().unwrap());
     assert_eq!(one.gid().unwrap(), two.gid().unwrap());
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn header_mode_config() {
+    let td = Builder::new().prefix("tar-rs").tempdir().unwrap();
+
+    const TIMESTAMP: u64 = 1234567890;
+    let metadata = {
+        let mut file = File::create(td.path().join("tmpfile")).unwrap();
+        file.write_all(b"c").unwrap();
+        file.set_modified(time::UNIX_EPOCH + time::Duration::from_secs(TIMESTAMP))
+            .unwrap();
+        file.metadata().unwrap()
+    };
+
+    let table = {
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+
+        #[cfg(unix)]
+        let (uid, gid, mode) = (metadata.uid(), metadata.gid(), metadata.mode());
+
+        #[cfg(not(unix))]
+        let (uid, gid, mode) = (0, 0, 0o644);
+
+        [
+            // Variations of `Deterministic`
+            (HeaderModeConfig::deterministic(), (0, 0, 1153704088, 0o644)),
+            (
+                HeaderModeConfig::deterministic().preserve_uid(),
+                (uid, 0, 1153704088, 0o644),
+            ),
+            (
+                HeaderModeConfig::deterministic().preserve_gid(),
+                (0, gid, 1153704088, 0o644),
+            ),
+            (
+                HeaderModeConfig::deterministic().preserve_mtime(),
+                (0, 0, TIMESTAMP, 0o644),
+            ),
+            (
+                HeaderModeConfig::deterministic().preserve_mode(),
+                (0, 0, 1153704088, mode),
+            ),
+            (
+                HeaderModeConfig::deterministic()
+                    .override_uid(1234)
+                    .override_gid(2345)
+                    .override_mtime(TIMESTAMP + 1000),
+                (1234, 2345, TIMESTAMP + 1000, 0o644),
+            ),
+            // Variations of `Complete`
+            (HeaderModeConfig::complete(), (uid, gid, TIMESTAMP, mode)),
+            (
+                HeaderModeConfig::complete().override_uid(3456),
+                (3456, gid, TIMESTAMP, mode),
+            ),
+            (
+                HeaderModeConfig::complete().override_gid(4567),
+                (uid, 4567, TIMESTAMP, mode),
+            ),
+            (
+                HeaderModeConfig::complete().override_mtime(TIMESTAMP + 1000),
+                (uid, gid, TIMESTAMP + 1000, mode),
+            ),
+            (
+                HeaderModeConfig::complete().clamp_mtime(TIMESTAMP + 1000),
+                (uid, gid, TIMESTAMP, mode),
+            ),
+            (
+                HeaderModeConfig::complete().clamp_mtime(TIMESTAMP - 1000),
+                (uid, gid, TIMESTAMP - 1000, mode),
+            ),
+            (
+                HeaderModeConfig::complete().normalize_mode(),
+                (uid, gid, TIMESTAMP, 0o644),
+            ),
+            (
+                HeaderModeConfig::complete()
+                    .preserve_uid()
+                    .preserve_gid()
+                    .preserve_mtime()
+                    .preserve_mode(),
+                (uid, gid, TIMESTAMP, mode),
+            ),
+        ]
+    };
+
+    for (mode, (uid, gid, mtime, file_mode)) in table.into_iter() {
+        let mut h = Header::new_ustar();
+        h.set_metadata_in_mode(&metadata, HeaderMode::Config(mode));
+        assert_eq!(h.uid().unwrap(), uid.into(), "uid, {mode:?}");
+        assert_eq!(h.gid().unwrap(), gid.into(), "gid, {mode:?}");
+        assert_eq!(h.mtime().unwrap(), mtime, "mtime, {mode:?}");
+        assert_eq!(h.mode().unwrap(), file_mode, "mode, {mode:?}");
+    }
 }
 
 #[test]

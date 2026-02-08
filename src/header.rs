@@ -4,6 +4,7 @@ use std::os::unix::prelude::*;
 use std::os::windows::prelude::*;
 
 use std::borrow::Cow;
+use std::cmp;
 use std::fmt;
 use std::fs;
 use std::io;
@@ -12,8 +13,9 @@ use std::mem;
 use std::path::{Component, Path, PathBuf};
 use std::str;
 
+use crate::header_mode;
 use crate::other;
-use crate::{EntryType, HeaderMode, DETERMINISTIC_TIMESTAMP};
+use crate::{EntryType, HeaderMode, HeaderModeConfig};
 
 pub(crate) const BLOCK_SIZE: u64 = 512;
 
@@ -723,56 +725,26 @@ impl Header {
     }
 
     fn fill_from(&mut self, meta: &fs::Metadata, mode: HeaderMode) {
-        self.fill_platform_from(meta, mode);
-        // Set size of directories to zero
-        self.set_size(if meta.is_dir() || meta.file_type().is_symlink() {
-            0
-        } else {
-            meta.len()
-        });
-        if let Some(ustar) = self.as_ustar_mut() {
-            ustar.set_device_major(0);
-            ustar.set_device_minor(0);
+        let HeaderModeConfig {
+            override_uid,
+            override_gid,
+            mtime_mode,
+            normalize_mode,
+        } = match mode {
+            HeaderMode::Complete => HeaderModeConfig::complete(),
+            HeaderMode::Deterministic => HeaderModeConfig::deterministic(),
+            HeaderMode::Config(config) => config,
+        };
+
+        #[cfg(all(unix, not(target_arch = "wasm32")))]
+        {
+            self.set_uid(override_uid.unwrap_or_else(|| meta.uid() as u64));
+            self.set_gid(override_gid.unwrap_or_else(|| meta.gid() as u64));
         }
-        if let Some(gnu) = self.as_gnu_mut() {
-            gnu.set_device_major(0);
-            gnu.set_device_minor(0);
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    #[allow(unused_variables)]
-    fn fill_platform_from(&mut self, meta: &fs::Metadata, mode: HeaderMode) {
-        unimplemented!();
-    }
-
-    #[cfg(all(unix, not(target_arch = "wasm32")))]
-    fn fill_platform_from(&mut self, meta: &fs::Metadata, mode: HeaderMode) {
-        match mode {
-            HeaderMode::Complete => {
-                self.set_mtime(meta.mtime() as u64);
-                self.set_uid(meta.uid() as u64);
-                self.set_gid(meta.gid() as u64);
-                self.set_mode(meta.mode());
-            }
-            HeaderMode::Deterministic => {
-                // We could in theory set the mtime to zero here, but not all tools seem to behave
-                // well when ingesting files with a 0 timestamp.
-                // For example, rust-lang/cargo#9512 shows that lldb doesn't ingest files with a
-                // zero timestamp correctly.
-                self.set_mtime(DETERMINISTIC_TIMESTAMP);
-
-                self.set_uid(0);
-                self.set_gid(0);
-
-                // Use a default umask value, but propagate the (user) execute bit.
-                let fs_mode = if meta.is_dir() || (0o100 & meta.mode() == 0o100) {
-                    0o755
-                } else {
-                    0o644
-                };
-                self.set_mode(fs_mode);
-            }
+        #[cfg(any(not(unix), target_arch = "wasm32"))]
+        {
+            self.set_uid(override_uid.unwrap_or(0));
+            self.set_gid(override_gid.unwrap_or(0));
         }
 
         // Note that if we are a GNU header we *could* set atime/ctime, except
@@ -784,11 +756,72 @@ impl Header {
         //
         // [1]: https://github.com/alexcrichton/tar-rs/issues/70
 
-        // TODO: need to bind more file types
-        self.set_entry_type(entry_type(meta.mode()));
+        self.set_mtime(match mtime_mode {
+            header_mode::Mtime::Keep => get_mtime(meta),
+            header_mode::Mtime::Set(mtime) => mtime,
+            header_mode::Mtime::Clamp(mtime) => cmp::min(get_mtime(meta), mtime),
+        });
 
-        fn entry_type(mode: u32) -> EntryType {
-            match mode as libc::mode_t & libc::S_IFMT {
+        fn get_mtime(meta: &fs::Metadata) -> u64 {
+            #[cfg(all(unix, not(target_arch = "wasm32")))]
+            return meta.mtime() as u64;
+
+            #[cfg(windows)]
+            // The dates listed in tarballs are always seconds relative to
+            // January 1, 1970. On Windows, however, the timestamps are returned as
+            // dates relative to January 1, 1601 (in 100ns intervals), so we need to
+            // add in some offset for those dates.
+            return (meta.last_write_time() / (1_000_000_000 / 100)) - 11644473600;
+
+            #[cfg(target_arch = "wasm32")]
+            unimplemented!()
+        }
+
+        self.set_mode(if normalize_mode {
+            #[cfg(all(unix, not(target_arch = "wasm32")))]
+            // Use a default umask value, but propagate the (user) execute bit.
+            if meta.is_dir() || (0o100 & meta.mode() == 0o100) {
+                0o755
+            } else {
+                0o644
+            }
+
+            #[cfg(windows)]
+            if meta.is_dir() {
+                0o755
+            } else {
+                0o644
+            }
+
+            #[cfg(target_arch = "wasm32")]
+            unimplemented!()
+        } else {
+            #[cfg(all(unix, not(target_arch = "wasm32")))]
+            {
+                meta.mode()
+            }
+
+            // There's no concept of a file mode on Windows, so do a best approximation here.
+            #[cfg(windows)]
+            {
+                const FILE_ATTRIBUTE_READONLY: u32 = 0x00000001;
+                let readonly = meta.file_attributes() & FILE_ATTRIBUTE_READONLY;
+                match (meta.is_dir(), readonly != 0) {
+                    (true, false) => 0o755,
+                    (true, true) => 0o555,
+                    (false, false) => 0o644,
+                    (false, true) => 0o444,
+                }
+            }
+
+            #[cfg(target_arch = "wasm32")]
+            unimplemented!()
+        });
+
+        self.set_entry_type({
+            #[cfg(all(unix, not(target_arch = "wasm32")))]
+            // TODO: need to bind more file types
+            match meta.mode() as libc::mode_t & libc::S_IFMT {
                 libc::S_IFREG => EntryType::file(),
                 libc::S_IFLNK => EntryType::symlink(),
                 libc::S_IFCHR => EntryType::character_special(),
@@ -797,53 +830,32 @@ impl Header {
                 libc::S_IFIFO => EntryType::fifo(),
                 _ => EntryType::new(b' '),
             }
-        }
-    }
 
-    #[cfg(windows)]
-    fn fill_platform_from(&mut self, meta: &fs::Metadata, mode: HeaderMode) {
-        // There's no concept of a file mode on Windows, so do a best approximation here.
-        match mode {
-            HeaderMode::Complete => {
-                self.set_uid(0);
-                self.set_gid(0);
-                // The dates listed in tarballs are always seconds relative to
-                // January 1, 1970. On Windows, however, the timestamps are returned as
-                // dates relative to January 1, 1601 (in 100ns intervals), so we need to
-                // add in some offset for those dates.
-                let mtime = (meta.last_write_time() / (1_000_000_000 / 100)) - 11644473600;
-                self.set_mtime(mtime);
-                let fs_mode = {
-                    const FILE_ATTRIBUTE_READONLY: u32 = 0x00000001;
-                    let readonly = meta.file_attributes() & FILE_ATTRIBUTE_READONLY;
-                    match (meta.is_dir(), readonly != 0) {
-                        (true, false) => 0o755,
-                        (true, true) => 0o555,
-                        (false, false) => 0o644,
-                        (false, true) => 0o444,
-                    }
-                };
-                self.set_mode(fs_mode);
+            #[cfg(any(not(unix), target_arch = "wasm32"))]
+            match meta.file_type() {
+                ft if ft.is_dir() => EntryType::dir(),
+                ft if ft.is_file() => EntryType::file(),
+                ft if ft.is_symlink() => EntryType::symlink(),
+                _ => EntryType::new(b' '),
             }
-            HeaderMode::Deterministic => {
-                self.set_uid(0);
-                self.set_gid(0);
-                self.set_mtime(DETERMINISTIC_TIMESTAMP); // see above in unix
-                let fs_mode = if meta.is_dir() { 0o755 } else { 0o644 };
-                self.set_mode(fs_mode);
-            }
-        }
-
-        let ft = meta.file_type();
-        self.set_entry_type(if ft.is_dir() {
-            EntryType::dir()
-        } else if ft.is_file() {
-            EntryType::file()
-        } else if ft.is_symlink() {
-            EntryType::symlink()
-        } else {
-            EntryType::new(b' ')
         });
+
+        // Set size of directories to zero
+        self.set_size(if meta.is_dir() || meta.file_type().is_symlink() {
+            0
+        } else {
+            meta.len()
+        });
+
+        if let Some(ustar) = self.as_ustar_mut() {
+            ustar.set_device_major(0);
+            ustar.set_device_minor(0);
+        }
+
+        if let Some(gnu) = self.as_gnu_mut() {
+            gnu.set_device_major(0);
+            gnu.set_device_minor(0);
+        }
     }
 
     fn debug_fields(&self, b: &mut fmt::DebugStruct) {
